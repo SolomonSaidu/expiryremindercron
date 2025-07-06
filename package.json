@@ -1,0 +1,18 @@
+{
+  "name": "expiryreminderserver",
+  "version": "1.0.0",
+  "description": "A background script that sends expiry reminders via email daily.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "Solomon TheDev",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.0.1",
+    "firebase-admin": "^13.4.0",
+    "node-cron": "^4.2.0",
+    "nodemailer": "^7.0.4"
+  }
+}
