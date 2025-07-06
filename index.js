@@ -80,11 +80,25 @@ async function checkProductsAndNotify() {
   });
 }
 
-// 🟢 Run immediately (for testing or Render deploy check)
+// 🟢 Run immediately on deploy
 checkProductsAndNotify();
 
-// ⏰ Run daily at 7 AM
+// ⏰ Schedule to run daily at 7 AM
 cron.schedule("0 7 * * *", () => {
   console.log("🕖 Running 7 AM reminder job...");
   checkProductsAndNotify();
+});
+
+
+// ✅ Express server (Render requires this)
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("🟢 Expiry Reminder Server is running.");
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
 });
