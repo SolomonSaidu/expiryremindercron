@@ -75,6 +75,7 @@ async function sendGroupedEmail(to, products) {
       </thead>
       <tbody>${rows}</tbody>
     </table>
+    <b>To stop this message delete the expiring product from your dashboard.</b>
   `;
 
   const mailOptions = {
