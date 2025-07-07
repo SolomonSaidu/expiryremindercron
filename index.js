@@ -1,20 +1,20 @@
-// index.js
 const express = require("express");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
+const cron = require("node-cron");
 require("dotenv").config();
+
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // Firebase Admin Setup
 const firebaseConfig = {
   projectId: process.env.FIREBASE_PROJECT_ID,
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
 };
 
 if (!firebaseConfig.projectId || !firebaseConfig.clientEmail || !firebaseConfig.privateKey) {
-  console.error("❌ Firebase credentials missing");
+  console.error("❌ Missing Firebase credentials in .env");
   process.exit(1);
 }
 
@@ -23,7 +23,7 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// Nodemailer Setup
+// Nodemailer setup
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
   port: process.env.EMAIL_PORT,
@@ -34,66 +34,107 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Utility: calculate days left
-const getDaysLeft = (expiryDateStr) => {
+// Utility: Calculate days until expiry
+function getDaysLeft(expiryDateStr) {
   const expiry = new Date(expiryDateStr);
   const now = new Date();
   return Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-};
+}
 
-// Send Reminder Email
-const sendReminderEmail = async (to, product, expiry, daysLeft) => {
+// Utility: Group by user email
+function groupByUser(products) {
+  const userMap = {};
+  products.forEach((product) => {
+    if (!userMap[product.owner]) userMap[product.owner] = [];
+    userMap[product.owner].push(product);
+  });
+  return userMap;
+}
+
+// Send grouped email
+async function sendGroupedEmail(to, products) {
+  const rows = products
+    .map(
+      (p) =>
+        `<tr><td>${p.product}</td><td>${p.expiry}</td><td>${getDaysLeft(
+          p.expiry
+        )}</td></tr>`
+    )
+    .join("");
+
+  const html = `
+    <h3>Hi,</h3>
+    <p>The following products are expiring soon:</p>
+    <table border="1" cellpadding="6" cellspacing="0">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Expiry Date</th>
+          <th>Days Left</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
   const mailOptions = {
     from: `"Expiry Reminder" <${process.env.EMAIL_USER}>`,
     to,
-    subject: `Reminder: ${product} expires in ${daysLeft} day(s)`,
-    html: `
-      <h3>Heads up! Your <strong>${product}</strong> is expiring soon</h3>
-      <p><strong>Expiry Date:</strong> ${expiry}</p>
-      <p>This product will expire in <strong>${daysLeft} day(s)</strong>.</p>
-    `,
+    subject: `You have ${products.length} product(s) expiring soon`,
+    html,
   };
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${to} for ${product}`);
-  } catch (err) {
-    console.error(`❌ Failed to email ${to}:`, err.message);
+    console.log(`✅ Grouped email sent to ${to}`);
+  } catch (error) {
+    console.error(`❌ Failed to email ${to}:`, error.message);
   }
-};
+}
 
-// Main Job
+// Main job
 async function checkProductsAndNotify() {
-  console.log("🔍 Checking products...");
+  console.log("🔍 Checking for expiring products...");
+
   const snapshot = await db.collection("products").get();
   const reminders = [1, 6, 7, 30, 90, 180];
+  const expiringProducts = [];
 
   snapshot.forEach((doc) => {
     const data = doc.data();
+
     if (!data.product || !data.expiry || !data.owner) {
-      console.warn(`⚠️ Skipping doc ${doc.id} due to missing fields`);
+      console.warn(`⚠️ Skipping doc ${doc.id}: missing fields`);
       return;
     }
 
     const daysLeft = getDaysLeft(data.expiry);
     if (reminders.includes(daysLeft)) {
-      sendReminderEmail(data.owner, data.product, data.expiry, daysLeft);
+      expiringProducts.push({ ...data, daysLeft });
     }
   });
+
+  // Group by user and send emails
+  const grouped = groupByUser(expiringProducts);
+  for (const [email, products] of Object.entries(grouped)) {
+    await sendGroupedEmail(email, products);
+  }
 }
 
-// Ping route for UptimeRobot
+// 🟢 Endpoint for Render + UptimeRobot to ping
 app.get("/run-job", async (req, res) => {
   await checkProductsAndNotify();
-  res.send("✅ Reminder job executed");
+  res.send("✅ Reminder check complete");
 });
 
-// Optional root route
-app.get("/", (req, res) => {
-  res.send("🟢 Expiry Reminder is alive!");
+// ⏰ Schedule daily run at 7 AM
+cron.schedule("0 7 * * *", () => {
+  console.log("⏰ Running scheduled 7 AM job...");
+  checkProductsAndNotify();
 });
 
-// Start server
+// 🔥 Start server for Render (required!)
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
