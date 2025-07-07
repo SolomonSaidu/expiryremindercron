@@ -63,7 +63,7 @@ async function sendGroupedEmail(to, products) {
     .join("");
 
   const html = `
-    <h3>Hi,</h3>
+    <h3>DateX, Product Reminder</h3>
     <p>The following products are expiring soon:</p>
     <table border="1" cellpadding="6" cellspacing="0">
       <thead>
@@ -101,18 +101,23 @@ async function checkProductsAndNotify() {
   const expiringProducts = [];
 
   snapshot.forEach((doc) => {
-    const data = doc.data();
+  const data = doc.data();
 
-    if (!data.product || !data.expiry || !data.owner) {
-      console.warn(`⚠️ Skipping doc ${doc.id}: missing fields`);
-      return;
-    }
+  if (!data.product || !data.expiry || !data.owner || !data.remindBefore) {
+    console.warn(`⚠️ Skipping doc ${doc.id}: missing fields`);
+    return;
+  }
 
-    const daysLeft = getDaysLeft(data.expiry);
-    if (reminders.includes(daysLeft)) {
-      expiringProducts.push({ ...data, daysLeft });
-    }
-  });
+  const daysLeft = getDaysLeft(data.expiry);
+
+  // Extract number from remindBefore string (e.g., "3days" → 3)
+  const remindDays = parseInt(data.remindBefore.replace(/\D/g, ""), 10);
+
+  if (daysLeft === remindDays) {
+    expiringProducts.push({ ...data, daysLeft });
+  }
+});
+
 
   // Group by user and send emails
   const grouped = groupByUser(expiringProducts);
