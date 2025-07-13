@@ -1,6 +1,9 @@
+const express = require("express");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
+
+const app = express();
 
 // Firebase Admin Setup
 const firebaseConfig = {
@@ -37,12 +40,12 @@ function getDaysLeft(expiryDateStr) {
   return Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
 }
 
-// Helper: Format today
+// Format today
 function getTodayKey() {
-  return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  return new Date().toISOString().split("T")[0];
 }
 
-// Group products by email
+// Group products by user email
 function groupByUser(products) {
   const userMap = {};
   products.forEach((p) => {
@@ -81,7 +84,7 @@ async function sendGroupedEmail(to, products) {
   }
 }
 
-// 🧠 CHECK if job already ran today
+// Has job already run today?
 async function jobAlreadyRanToday() {
   const todayKey = getTodayKey();
   const ref = db.collection("meta").doc("lastReminder");
@@ -92,12 +95,11 @@ async function jobAlreadyRanToday() {
     return true;
   }
 
-  // Save today's date
   await ref.set({ date: todayKey });
   return false;
 }
 
-// 🔁 Main reminder logic
+// 🔁 Main logic
 async function checkProductsAndNotify() {
   console.log("🔍 Checking for expiring products...");
 
@@ -126,10 +128,14 @@ async function checkProductsAndNotify() {
   console.log("✅ Reminder job finished.");
 }
 
-// Run when executed directly
-if (require.main === module) {
-  checkProductsAndNotify().catch((err) => {
-    console.error("❌ Job failed:", err);
-    process.exit(1);
-  });
-}
+// 🟢 Route to trigger the job manually or by cron-job.org
+app.get("/run-job", async (req, res) => {
+  await checkProductsAndNotify();
+  res.send("✅ Reminder check complete");
+});
+
+// 🔥 Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
