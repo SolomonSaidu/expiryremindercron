@@ -19,101 +19,96 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// Nodemailer (Brevo SMTP) setup
+// Nodemailer setup
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,       // smtp.gmail.com
-  port: process.env.EMAIL_PORT,       // 587
-  secure: true,                      // must be false for port 587
+  host: process.env.EMAIL_HOST,
+  port: process.env.EMAIL_PORT,
+  secure: true,
   auth: {
-    user: process.env.EMAIL_USER,     // your Gmail address
-    pass: process.env.EMAIL_PASS,     // your app password
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
-
-transporter.verify(function (error, success) {
-  if (error) {
-    console.log("❌ SMTP Error:", error);
-  } else {
-    console.log("✅ SMTP is ready to send messages!");
-  }
-});
-
-
-
-// Utility: Get days until expiry
+// Helper: Days until expiry
 function getDaysLeft(expiryDateStr) {
   const expiry = new Date(expiryDateStr);
   const now = new Date();
   return Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
 }
 
-// Group products by user email
+// Helper: Format today
+function getTodayKey() {
+  return new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+}
+
+// Group products by email
 function groupByUser(products) {
   const userMap = {};
-  products.forEach((product) => {
-    if (!userMap[product.owner]) userMap[product.owner] = [];
-    userMap[product.owner].push(product);
+  products.forEach((p) => {
+    if (!userMap[p.owner]) userMap[p.owner] = [];
+    userMap[p.owner].push(p);
   });
   return userMap;
 }
 
-// Send grouped email in HTML table
+// Send HTML email
 async function sendGroupedEmail(to, products) {
   const rows = products
-    .map(
-      (p) =>
-        `<tr><td>${p.product}</td><td>${p.expiry}</td><td>${getDaysLeft(
-          p.expiry
-        )}</td></tr>`
-    )
+    .map((p) => `<tr><td>${p.product}</td><td>${p.expiry}</td><td>${getDaysLeft(p.expiry)}</td></tr>`)
     .join("");
 
   const html = `
     <h3>📦 Expiry Reminder</h3>
     <p>The following products are expiring soon:</p>
     <table border="1" cellpadding="6" cellspacing="0">
-      <thead>
-        <tr>
-          <th>Product</th>
-          <th>Expiry Date</th>
-          <th>Days Left</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Product</th><th>Expiry Date</th><th>Days Left</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <p><i>To stop getting this message, delete the expiring product from your dashboard.</i></p>
+    <p><i>To stop this message, delete the expiring product from your dashboard.</i></p>
   `;
 
-  const mailOptions = {
-    from: `"DateX Reminder" <no-reply@solomondev.com>`,
-    to,
-    subject: `⏰ You have ${products.length} product(s) expiring soon`,
-    html,
-  };
-
   try {
-    await transporter.sendMail(mailOptions);
+    await transporter.sendMail({
+      from: `"DateX Reminder" <no-reply@solomondev.com>`,
+      to,
+      subject: `⏰ ${products.length} product(s) expiring soon`,
+      html,
+    });
     console.log(`✅ Email sent to ${to}`);
   } catch (error) {
-    console.error(`❌ Error sending to ${to}:`, error.message);
+    console.error(`❌ Failed to send to ${to}: ${error.message}`);
   }
 }
 
-// Main job
+// 🧠 CHECK if job already ran today
+async function jobAlreadyRanToday() {
+  const todayKey = getTodayKey();
+  const ref = db.collection("meta").doc("lastReminder");
+  const doc = await ref.get();
+
+  if (doc.exists && doc.data().date === todayKey) {
+    console.log("⏭️ Email already sent today. Skipping...");
+    return true;
+  }
+
+  // Save today's date
+  await ref.set({ date: todayKey });
+  return false;
+}
+
+// 🔁 Main reminder logic
 async function checkProductsAndNotify() {
   console.log("🔍 Checking for expiring products...");
+
+  if (await jobAlreadyRanToday()) return;
 
   const snapshot = await db.collection("products").get();
   const expiringProducts = [];
 
   snapshot.forEach((doc) => {
     const data = doc.data();
-
-    if (!data.product || !data.expiry || !data.owner || !data.remindBefore) {
-      console.warn(`⚠️ Skipping doc ${doc.id}: missing fields`);
-      return;
-    }
+    if (!data.product || !data.expiry || !data.owner || !data.remindBefore) return;
 
     const daysLeft = getDaysLeft(data.expiry);
     const remindDays = parseInt(data.remindBefore.replace(/\D/g, ""), 10);
@@ -127,17 +122,14 @@ async function checkProductsAndNotify() {
   for (const [email, products] of Object.entries(grouped)) {
     await sendGroupedEmail(email, products);
   }
+
+  console.log("✅ Reminder job finished.");
 }
 
-// ✅ Entry point: only run when file is directly executed
+// Run when executed directly
 if (require.main === module) {
-  checkProductsAndNotify()
-    .then(() => {
-      console.log("✅ Reminder job finished.");
-      process.exit(0);
-    })
-    .catch((err) => {
-      console.error("❌ Job failed:", err);
-      process.exit(1);
-    });
+  checkProductsAndNotify().catch((err) => {
+    console.error("❌ Job failed:", err);
+    process.exit(1);
+  });
 }
